@@ -1,0 +1,74 @@
+name: Auto Compile Loyalsoldier Rules to MRS
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # 每天北京时间 12:00 自动执行一次
+  workflow_dispatch:   # 允许在网页上点击按钮手动触发运行
+
+permissions:
+  contents: write      # 赋予工作流写入仓库内容的权限
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Mihomo and Compile Rules
+        run: |
+          set -e
+          # 创建存放 mrs 的输出目录
+          mkdir -p ruleset
+
+          # 1. 动态获取最新稳定版 Mihomo 的版本号
+          VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep tag_name | cut -d '"' -f 4)
+          if [ -z "$VERSION" ]; then
+            VERSION="v1.18.9" # 获取失败时的 Fallback 稳定版
+          fi
+          echo "检测到 Mihomo 最新版本: $VERSION"
+
+          # 2. 下载并解压适配 GitHub 虚拟环境的 Linux AMD64 兼容版内核
+          curl -Lo mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+          gunzip -f mihomo.gz
+          chmod +x mihomo
+
+          # 3. 定义域名规则列表 (behavior: domain)
+          DOMAINS=("reject" "icloud" "apple" "google" "proxy" "direct" "private" "gfw" "tld-not-cn")
+
+          # 4. 定义 IP 规则列表 (behavior: ipcidr)
+          IPCIDRS=("telegramcidr" "cncidr" "lancidr")
+
+          # 5. 下载并编译 域名规则
+          for rule in "${DOMAINS[@]}"; do
+            echo "正在编译域名规则: $rule"
+            curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
+            ./mihomo convert-ruleset domain text "${rule}.txt" "ruleset/${rule}.mrs"
+            rm -f "${rule}.txt"
+          done
+
+          # 6. 下载并编译 IP规则
+          for rule in "${IPCIDRS[@]}"; do
+            echo "正在编译 IP 规则: $rule"
+            curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
+            ./mihomo convert-ruleset ipcidr text "${rule}.txt" "ruleset/${rule}.mrs"
+            rm -f "${rule}.txt"
+          done
+
+          # 7. 清理本地临时二进制
+          rm -f mihomo
+
+      - name: Commit and Push to Repository
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add ruleset/*.mrs
+          
+          # 判断是否有编译出的 mrs 文件更新，防止无更新时推送报错
+          if git diff --staged --quiet; then
+            echo "没有检测到任何规则集更新，跳过推送。"
+          else
+            git commit -m "Auto-compile ruleset to MRS [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git push origin HEAD:${{ github.ref }}
+          fi
