@@ -3,7 +3,7 @@ name: Auto Compile Loyalsoldier Rules to MRS
 on:
   schedule:
     - cron: '0 4 * * *' # 每天北京时间 12:00 自动执行一次
-  workflow_dispatch:   # 允许在网页上点击按钮手动触发运行
+  workflow_dispatch:   # 允许手动触发运行
 
 permissions:
   contents: write      # 赋予工作流写入仓库内容的权限
@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Mihomo and Compile Rules
         run: |
@@ -40,19 +40,19 @@ jobs:
           # 4. 定义 IP 规则列表 (behavior: ipcidr)
           IPCIDRS=("telegramcidr" "cncidr" "lancidr")
 
-          # 5. 下载并编译 域名规则
+          # 5. 下载并编译 域名规则 (将格式参数从 text 改为 yaml)
           for rule in "${DOMAINS[@]}"; do
             echo "正在编译域名规则: $rule"
             curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
-            ./mihomo convert-ruleset domain text "${rule}.txt" "ruleset/${rule}.mrs"
+            ./mihomo convert-ruleset domain yaml "${rule}.txt" "ruleset/${rule}.mrs"
             rm -f "${rule}.txt"
           done
 
-          # 6. 下载并编译 IP规则
+          # 6. 下载并编译 IP规则 (将格式参数从 text 改为 yaml)
           for rule in "${IPCIDRS[@]}"; do
             echo "正在编译 IP 规则: $rule"
             curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
-            ./mihomo convert-ruleset ipcidr text "${rule}.txt" "ruleset/${rule}.mrs"
+            ./mihomo convert-ruleset ipcidr yaml "${rule}.txt" "ruleset/${rule}.mrs"
             rm -f "${rule}.txt"
           done
 
