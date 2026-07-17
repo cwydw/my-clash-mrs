@@ -2,7 +2,7 @@ name: Auto Compile Loyalsoldier Rules to MRS
 
 on:
   schedule:
-    - cron: '0 4 * * *' # 每天北京时间 12:00 自动执行一次
+    - cron: '17 3 * * *' # 每天北京时间 11：17 自动执行一次
   workflow_dispatch:   # 允许手动触发运行
 
 permissions:
