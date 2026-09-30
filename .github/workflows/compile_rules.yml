@@ -19,18 +19,17 @@ jobs:
       - name: Setup Mihomo and Compile Rules
         run: |
           set -e
-          # 创建存放 mrs 的输出目录
+          
           mkdir -p ruleset
-
-          # 1. 动态获取最新稳定版 Mihomo 的版本号
-          VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep tag_name | cut -d '"' -f 4)
-          if [ -z "$VERSION" ]; then
-            VERSION="v1.19.26" # 获取失败时的 Fallback 稳定版
+          
+          VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | jq -r '.tag_name // empty')
+          if [[ ! "$VERSION" =~ ^v[0-9] ]]; then
+            VERSION="v1.19.26"
           fi
           echo "检测到 Mihomo 最新版本: $VERSION"
-
-          # 2. 下载并解压适配 GitHub 虚拟环境的 Linux AMD64 兼容版内核
-          curl -Lo mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+          
+          curl -fLo mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+          file mihomo.gz | grep -q gzip
           gunzip -f mihomo.gz
           chmod +x mihomo
 
