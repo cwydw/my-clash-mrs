@@ -2,11 +2,11 @@ name: Auto Compile Loyalsoldier Rules to MRS
 
 on:
   schedule:
-    - cron: '17 3 * * *' # 每天北京时间 11：17 自动执行一次
-  workflow_dispatch:   # 允许手动触发运行
+    - cron: '17 3 * * *' # 每天北京时间 11:17 自动执行一次
+  workflow_dispatch:     # 允许手动触发运行
 
 permissions:
-  contents: write      # 赋予工作流写入仓库内容的权限
+  contents: write        # 赋予工作流写入仓库内容的权限
 
 jobs:
   build:
@@ -17,21 +17,46 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Mihomo and Compile Rules
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
-          
+          set -euo pipefail
+
           mkdir -p ruleset
-          
-          VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | jq -r '.tag_name // empty')
+
+          # 1. 获取 Mihomo 最新版本（附带 Token 避免 API 限流）
+          VERSION=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+            https://api.github.com/repos/MetaCubeX/mihomo/releases/latest \
+            | jq -r '.tag_name // empty' || true)
           if [[ ! "$VERSION" =~ ^v[0-9] ]]; then
             VERSION="v1.19.26"
           fi
           echo "检测到 Mihomo 最新版本: $VERSION"
-          
-          curl -fLo mihomo.gz "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
+
+          # 2. 下载并解压 Mihomo
+          curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o mihomo.gz \
+            "https://github.com/MetaCubeX/mihomo/releases/download/${VERSION}/mihomo-linux-amd64-compatible-${VERSION}.gz"
           file mihomo.gz | grep -q gzip
           gunzip -f mihomo.gz
           chmod +x mihomo
+
+          # 封装下载与校验函数（主源失败自动切换 Releases 备用源）
+          download_rule() {
+            local rule="$1"
+            local raw_url="https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
+            local rel_url="https://github.com/Loyalsoldier/clash-rules/releases/latest/download/${rule}.txt"
+
+            if ! curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "${rule}.txt" "$raw_url"; then
+              echo "raw 源下载失败，尝试备用源: $rule"
+              curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "${rule}.txt" "$rel_url"
+            fi
+
+            if ! grep -q '^payload:' "${rule}.txt"; then
+              echo "错误: ${rule}.txt 内容异常，缺少 payload 字段，前 10 行内容如下："
+              head -n 10 "${rule}.txt"
+              exit 1
+            fi
+          }
 
           # 3. 定义域名规则列表 (behavior: domain)
           DOMAINS=("reject" "icloud" "apple" "google" "proxy" "direct" "private" "gfw" "tld-not-cn")
@@ -39,18 +64,18 @@ jobs:
           # 4. 定义 IP 规则列表 (behavior: ipcidr)
           IPCIDRS=("telegramcidr" "cncidr" "lancidr")
 
-          # 5. 下载并编译 域名规则 (将格式参数从 text 改为 yaml)
+          # 5. 下载并编译域名规则
           for rule in "${DOMAINS[@]}"; do
             echo "正在编译域名规则: $rule"
-            curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
+            download_rule "$rule"
             ./mihomo convert-ruleset domain yaml "${rule}.txt" "ruleset/${rule}.mrs"
             rm -f "${rule}.txt"
           done
 
-          # 6. 下载并编译 IP规则 (将格式参数从 text 改为 yaml)
+          # 6. 下载并编译 IP 规则
           for rule in "${IPCIDRS[@]}"; do
             echo "正在编译 IP 规则: $rule"
-            curl -Lo "${rule}.txt" "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${rule}.txt"
+            download_rule "$rule"
             ./mihomo convert-ruleset ipcidr yaml "${rule}.txt" "ruleset/${rule}.mrs"
             rm -f "${rule}.txt"
           done
@@ -60,10 +85,10 @@ jobs:
 
       - name: Commit and Push to Repository
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ruleset/*.mrs
-          
+
           # 判断是否有编译出的 mrs 文件更新，防止无更新时推送报错
           if git diff --staged --quiet; then
             echo "没有检测到任何规则集更新，跳过推送。"
